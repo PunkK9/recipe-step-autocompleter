@@ -14,7 +14,7 @@ This CLI tool assists home cooks by providing intelligent autocompletion for rec
 
 Tick these off as you go, and commit after each one.
 
-- [ ] **1. Compile a corpus of cooking recipe instructions.**  
+- [x] **1. Compile a corpus of cooking recipe instructions.**  
       Hint: Corpus creation and preprocessing.
 - [ ] **2. Implement n-gram counting and maximum-likelihood probabilities with smoothing.**  
       Hint: N-gram counting and probability calculation with smoothing.
