@@ -7,6 +7,7 @@ from app.core import (
     milestone_1,
     milestone_2,
     milestone_3,
+    milestone_4,
     NGramModel,
     generate_continuation,
     predict_next_word_candidates,
@@ -17,6 +18,8 @@ from app.core import (
     START_TOKEN,
     END_TOKEN,
 )
+from app.cli import main
+from app.storage import Store
 
 
 # Milestone 1: Compile a corpus of cooking recipe instructions.
@@ -93,27 +96,21 @@ def test_milestone_2():
 
 # Milestone 3: Create a function to generate recipe step continuations.
 def test_milestone_3():
-    # 1. Test next word prediction
     top_candidates = predict_next_word_candidates("Preheat the oven to", top_k=3)
     assert len(top_candidates) > 0
     words = [word for word, _ in top_candidates]
-    # In cooking corpus, '350' or '400' follow 'oven to'
     assert any(num in words for num in ["350", "400", "degrees"])
 
-    # 2. Test continuation generation
     continuation = generate_continuation("Preheat the oven to", max_words=10)
     assert len(continuation) > 0
     assert "degrees" in continuation
 
-    # 3. Test season continuation
     season_continuation = generate_continuation("Season generously with", max_words=5)
     assert any(seasoning in season_continuation for seasoning in ["kosher", "salt", "black", "pepper"])
 
-    # 4. Test max_words limits length
     short_cont = generate_continuation("Heat olive oil in", max_words=2)
     assert len(short_cont.split()) <= 2
 
-    # 5. Test milestone_3 wrapper
     m3_res = milestone_3()
     assert "completions" in m3_res
     assert len(m3_res["completions"]) >= 4
@@ -124,6 +121,31 @@ def test_milestone_3():
 
 
 # Milestone 4: Build a CLI for users to input partial steps and get suggestions.
-@pytest.mark.skip(reason="remove this line when you start milestone 4")
-def test_milestone_4():
-    raise NotImplementedError("write the test for milestone 4")
+def test_milestone_4(capsys, tmp_path, monkeypatch):
+    # 1. Test programmatic milestone_4 function
+    res = milestone_4(prompt="Heat olive oil in a", top_n=3)
+    assert isinstance(res, dict)
+    assert res["prompt"] == "Heat olive oil in a"
+    assert len(res["top_suggestions"]) == 3
+    assert len(res["continuation"]) > 0
+
+    # 2. Test CLI autocomplete command
+    main(["autocomplete", "Preheat the oven to", "--top-n", "3", "--max-words", "5"])
+    captured = capsys.readouterr().out
+    assert "Top 3 Next-Word Suggestions:" in captured
+    assert "Suggested Completion:" in captured
+
+    # 3. Test CLI stats command
+    main(["stats"])
+    stats_out = capsys.readouterr().out
+    assert "Model Statistics" in stats_out
+    assert "Vocabulary Size" in stats_out
+
+    # 4. Test CLI add-instruction command (stretch feature)
+    monkeypatch.setenv("DATA_PATH", str(tmp_path / "custom.json"))
+    main(["add-instruction", "Whisk matcha powder in a warm bowl until frothy."])
+    add_out = capsys.readouterr().out
+    assert "Added instruction to corpus" in add_out
+
+    store = Store(str(tmp_path / "custom.json"))
+    assert "Whisk matcha powder in a warm bowl until frothy." in store.get("custom_recipes", [])

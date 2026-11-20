@@ -295,5 +295,17 @@ def milestone_3(
 
 # --- Milestone 4: Build a CLI for users to input partial steps and get suggestions.
 # Hint: Command-line interface (CLI) development.
-def milestone_4():  # TODO(milestone 4)
-    raise NotImplementedError("TODO(milestone 4)")
+def milestone_4(
+    prompt: str = "Heat olive oil in a", top_n: int = 5, max_words: int = 10
+) -> dict[str, Any]:
+    """Milestone 4: Build a CLI for users to input partial steps and get suggestions."""
+    model = milestone_2()["model"]
+    candidates = predict_next_word_candidates(prompt, model=model, top_k=top_n)
+    continuation = generate_continuation(prompt, model=model, max_words=max_words)
+    full_step = f"{prompt} {continuation}".strip()
+    return {
+        "prompt": prompt,
+        "top_suggestions": candidates,
+        "continuation": continuation,
+        "completed_step": full_step,
+    }
