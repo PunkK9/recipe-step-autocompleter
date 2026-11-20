@@ -5,6 +5,8 @@ They start skipped. Remove the `skip` line as you work on each milestone.
 import pytest
 from app.core import (
     milestone_1,
+    milestone_2,
+    NGramModel,
     tokenize,
     clean_text,
     build_corpus,
@@ -16,7 +18,6 @@ from app.core import (
 
 # Milestone 1: Compile a corpus of cooking recipe instructions.
 def test_milestone_1():
-    # Test milestone_1 compiles default corpus
     result = milestone_1()
     assert isinstance(result, dict)
     assert "corpus" in result
@@ -25,12 +26,10 @@ def test_milestone_1():
     assert result["vocab_size"] > 0
 
     corpus = result["corpus"]
-    # Check that sentences have boundary tokens
     first_sentence = corpus[0]
     assert first_sentence[0] == START_TOKEN
     assert first_sentence[-1] == END_TOKEN
 
-    # Test custom corpus input
     custom_recipes = [
         "Preheat the oven to 375 degrees.",
         "Whisk the eggs gently."
@@ -40,16 +39,62 @@ def test_milestone_1():
     assert "preheat" in custom_result["vocabulary"]
     assert "whisk" in custom_result["vocabulary"]
 
-    # Test tokenization and clean text
     assert clean_text("  Heat   olive   oil.  ") == "Heat olive oil."
     tokens = tokenize("Chop 2 onions, finely!", n_gram_order=3, add_boundaries=False)
     assert tokens == ["chop", "2", "onions", "finely"]
 
 
 # Milestone 2: Implement n-gram counting and maximum-likelihood probabilities with smoothing.
-@pytest.mark.skip(reason="remove this line when you start milestone 2")
 def test_milestone_2():
-    raise NotImplementedError("write the test for milestone 2")
+    # Test on a small controlled corpus
+    sentences = [
+        ["<s>", "<s>", "heat", "the", "oil", "</s>"],
+        ["<s>", "<s>", "heat", "the", "butter", "</s>"],
+    ]
+    model = NGramModel(n=3, k=1.0)
+    model.train(sentences)
+
+    # 1. Check n-gram and context counts
+    assert model.get_ngram_count(("<s>", "<s>", "heat")) == 2
+    assert model.get_ngram_count(("heat", "the", "oil")) == 1
+    assert model.get_ngram_count(("heat", "the", "butter")) == 1
+    assert model.get_context_count(("heat", "the")) == 2
+
+    # 2. Check MLE probabilities (no smoothing)
+    prob_oil_mle = model.mle_probability("oil", ("heat", "the"))
+    prob_butter_mle = model.mle_probability("butter", ("heat", "the"))
+    prob_unseen_mle = model.mle_probability("garlic", ("heat", "the"))
+    assert prob_oil_mle == 0.5
+    assert prob_butter_mle == 0.5
+    assert prob_unseen_mle == 0.0
+
+    # 3. Check Laplace (Add-k) smoothing
+    v_size = model.vocab_size
+    assert v_size == 6  # <s>, heat, the, oil, butter, </s>
+    prob_oil_smooth = model.probability("oil", ("heat", "the"), k=1.0)
+    # count is 1, context count is 2. (1 + 1) / (2 + 1 * 6) = 2 / 8 = 0.25
+    assert prob_oil_smooth == pytest.approx(2.0 / (2.0 + 1.0 * v_size))
+
+    # Unseen word should have non-zero probability
+    prob_unseen_smooth = model.probability("unseen_word", ("heat", "the"), k=1.0)
+    assert prob_unseen_smooth > 0.0
+
+    # Probabilities across all words in vocabulary sum to 1.0
+    total_prob = sum(model.probability(w, ("heat", "the"), k=1.0) for w in model.vocabulary)
+    assert total_prob == pytest.approx(1.0)
+
+    # 4. Check candidates ranking
+    candidates = model.get_candidates(("heat", "the"), top_n=2)
+    assert len(candidates) == 2
+    candidate_words = [word for word, _ in candidates]
+    assert "oil" in candidate_words
+    assert "butter" in candidate_words
+
+    # 5. Check milestone_2 function runs on full default corpus
+    res = milestone_2()
+    assert isinstance(res, dict)
+    assert res["total_unique_ngrams"] > 50
+    assert len(res["sample_candidates"]) > 0
 
 
 # Milestone 3: Create a function to generate recipe step continuations.

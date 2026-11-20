@@ -16,7 +16,7 @@ Tick these off as you go, and commit after each one.
 
 - [x] **1. Compile a corpus of cooking recipe instructions.**  
       Hint: Corpus creation and preprocessing.
-- [ ] **2. Implement n-gram counting and maximum-likelihood probabilities with smoothing.**  
+- [x] **2. Implement n-gram counting and maximum-likelihood probabilities with smoothing.**  
       Hint: N-gram counting and probability calculation with smoothing.
 - [ ] **3. Create a function to generate recipe step continuations.**  
       Hint: Text generation using the N-gram model.
