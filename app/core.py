@@ -67,42 +67,63 @@ def milestone_1(instructions: list[str] | None = None, n_gram_order: int = 3) ->
 
 
 class NGramModel:
-    """N-gram language model with Maximum Likelihood Estimation and Add-k (Laplace) smoothing."""
+    """N-gram language model with Maximum Likelihood Estimation, Add-k smoothing, and backoff."""
 
     def __init__(self, n: int = 3, k: float = 1.0):
         self.n = max(1, n)
         self.k = float(k)
-        self.ngram_counts: dict[tuple[str, ...], int] = Counter()
-        self.context_counts: dict[tuple[str, ...], int] = Counter()
+        # Store counts for all orders from 1 up to n for backoff
+        self.all_ngram_counts: dict[int, dict[tuple[str, ...], int]] = {
+            order: Counter() for order in range(1, self.n + 1)
+        }
+        self.all_context_counts: dict[int, dict[tuple[str, ...], int]] = {
+            order: Counter() for order in range(1, self.n + 1)
+        }
         self.vocabulary: set[str] = set()
 
+    @property
+    def ngram_counts(self) -> dict[tuple[str, ...], int]:
+        return self.all_ngram_counts[self.n]
+
+    @property
+    def context_counts(self) -> dict[tuple[str, ...], int]:
+        return self.all_context_counts[self.n]
+
     def train(self, corpus: list[list[str]]) -> None:
-        """Extract and count n-grams and contexts from tokenized sentences."""
-        self.ngram_counts.clear()
-        self.context_counts.clear()
+        """Extract and count n-grams and contexts from tokenized sentences across all orders."""
+        for order in range(1, self.n + 1):
+            self.all_ngram_counts[order].clear()
+            self.all_context_counts[order].clear()
         self.vocabulary.clear()
 
         for sentence in corpus:
             self.vocabulary.update(sentence)
-            if len(sentence) < self.n:
-                continue
-            for i in range(len(sentence) - self.n + 1):
-                ngram = tuple(sentence[i : i + self.n])
-                context = ngram[:-1]
-                self.ngram_counts[ngram] += 1
-                self.context_counts[context] += 1
+            for order in range(1, self.n + 1):
+                if len(sentence) < order:
+                    continue
+                for i in range(len(sentence) - order + 1):
+                    ngram = tuple(sentence[i : i + order])
+                    context = ngram[:-1]
+                    self.all_ngram_counts[order][ngram] += 1
+                    self.all_context_counts[order][context] += 1
 
     @property
     def vocab_size(self) -> int:
         return len(self.vocabulary)
 
     def get_ngram_count(self, ngram: tuple[str, ...]) -> int:
-        """Return raw frequency of the n-gram."""
-        return self.ngram_counts.get(ngram, 0)
+        """Return raw frequency of the n-gram for its specific order."""
+        order = len(ngram)
+        if order in self.all_ngram_counts:
+            return self.all_ngram_counts[order].get(ngram, 0)
+        return 0
 
     def get_context_count(self, context: tuple[str, ...]) -> int:
         """Return raw frequency of the context prefix."""
-        return self.context_counts.get(context, 0)
+        order = len(context) + 1
+        if order in self.all_context_counts:
+            return self.all_context_counts[order].get(context, 0)
+        return 0
 
     def mle_probability(self, word: str, context: tuple[str, ...]) -> float:
         """Calculate unsmoothed Maximum Likelihood Estimation probability: C(context, word) / C(context)."""
@@ -113,10 +134,7 @@ class NGramModel:
         return self.get_ngram_count(ngram) / ctx_count
 
     def probability(self, word: str, context: tuple[str, ...], k: float | None = None) -> float:
-        """Calculate smoothed probability using Add-k (Laplace) smoothing.
-
-        P(word | context) = (C(context, word) + k) / (C(context) + k * |V|)
-        """
+        """Calculate smoothed probability using Add-k (Laplace) smoothing."""
         smooth_k = self.k if k is None else float(k)
         ctx_count = self.get_context_count(context)
         v_size = max(1, self.vocab_size)
@@ -133,27 +151,89 @@ class NGramModel:
         context: tuple[str, ...],
         top_n: int = 5,
         exclude_tokens: set[str] | None = None,
+        use_backoff: bool = True,
     ) -> list[tuple[str, float]]:
-        """Return top_n candidate words with their smoothed probabilities given the context."""
+        """Return top_n candidate words with their probabilities given context, with backoff support."""
         if exclude_tokens is None:
             exclude_tokens = {START_TOKEN}
 
-        # Format context to length (n - 1)
         expected_len = self.n - 1
+        # Truncate if context is longer than expected
         if len(context) > expected_len:
-            context = context[-expected_len:]
+            curr_context = context[-expected_len:]
         elif len(context) < expected_len:
-            context = (START_TOKEN,) * (expected_len - len(context)) + context
+            curr_context = (START_TOKEN,) * (expected_len - len(context)) + context
+        else:
+            curr_context = context
+
+        # Check if context was observed; if not and backoff is enabled, back off to smaller context
+        if use_backoff and self.n > 1:
+            while len(curr_context) > 0 and self.get_context_count(curr_context) == 0:
+                curr_context = curr_context[1:]
 
         scores: list[tuple[str, float]] = []
         for word in self.vocabulary:
             if word in exclude_tokens:
                 continue
-            prob = self.probability(word, context)
+            prob = self.probability(word, curr_context)
             scores.append((word, prob))
 
         scores.sort(key=lambda item: item[1], reverse=True)
         return scores[:top_n]
+
+
+def generate_continuation(
+    prompt: str,
+    model: NGramModel | None = None,
+    max_words: int = 15,
+    stop_at_end: bool = True,
+) -> str:
+    """Generate autocompletion continuation for a partial recipe step using the N-gram model."""
+    if model is None:
+        model = milestone_2()["model"]
+
+    # Tokenize the user's prompt without adding boundaries
+    tokens = tokenize(prompt, n_gram_order=model.n, add_boundaries=False)
+
+    expected_context_len = model.n - 1
+    if len(tokens) < expected_context_len:
+        current_context = [START_TOKEN] * (expected_context_len - len(tokens)) + tokens
+    else:
+        current_context = tokens[-expected_context_len:]
+
+    generated_words: list[str] = []
+
+    for _ in range(max_words):
+        ctx_tuple = tuple(current_context[-expected_context_len:])
+        candidates = model.get_candidates(ctx_tuple, top_n=5, exclude_tokens={START_TOKEN})
+        if not candidates:
+            break
+
+        best_word = candidates[0][0]
+        if stop_at_end and best_word == END_TOKEN:
+            break
+
+        generated_words.append(best_word)
+        current_context.append(best_word)
+
+    return " ".join(generated_words)
+
+
+def predict_next_word_candidates(
+    prompt: str, model: NGramModel | None = None, top_k: int = 5
+) -> list[tuple[str, float]]:
+    """Predict the top-k next words and their probabilities for a prompt."""
+    if model is None:
+        model = milestone_2()["model"]
+
+    tokens = tokenize(prompt, n_gram_order=model.n, add_boundaries=False)
+    expected_context_len = model.n - 1
+    if len(tokens) < expected_context_len:
+        ctx_tuple = (START_TOKEN,) * (expected_context_len - len(tokens)) + tuple(tokens)
+    else:
+        ctx_tuple = tuple(tokens[-expected_context_len:])
+
+    return model.get_candidates(ctx_tuple, top_n=top_k, exclude_tokens={START_TOKEN, END_TOKEN})
 
 
 # --- Milestone 2: Implement n-gram counting and maximum-likelihood probabilities with smoothing.
@@ -166,7 +246,6 @@ def milestone_2(
     model = NGramModel(n=n, k=k)
     model.train(corpus)
 
-    # Sample context to demonstrate probability calculation
     sample_context = (START_TOKEN,) * (n - 1)
     sample_candidates = model.get_candidates(sample_context, top_n=5)
 
@@ -183,8 +262,35 @@ def milestone_2(
 
 # --- Milestone 3: Create a function to generate recipe step continuations.
 # Hint: Text generation using the N-gram model.
-def milestone_3():  # TODO(milestone 3)
-    raise NotImplementedError("TODO(milestone 3)")
+def milestone_3(
+    test_prompts: list[str] | None = None, model: NGramModel | None = None
+) -> dict[str, Any]:
+    """Milestone 3: Generate continuations for recipe instruction prefixes."""
+    if model is None:
+        m2_res = milestone_2()
+        model = m2_res["model"]
+
+    prompts = test_prompts or [
+        "Preheat the oven to",
+        "Heat olive oil in",
+        "Season generously with",
+        "Bring a large pot of",
+    ]
+
+    completions = {}
+    for p in prompts:
+        continuation = generate_continuation(p, model=model)
+        candidates = predict_next_word_candidates(p, model=model, top_k=3)
+        completions[p] = {
+            "continuation": continuation,
+            "full_step": f"{p} {continuation}".strip(),
+            "top_candidates": candidates,
+        }
+
+    return {
+        "model": model,
+        "completions": completions,
+    }
 
 
 # --- Milestone 4: Build a CLI for users to input partial steps and get suggestions.
