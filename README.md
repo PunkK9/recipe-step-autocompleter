@@ -1,6 +1,6 @@
-# Recipe Step Autocompleter
-
 [![Built with askThili](https://msrit.ask.thili.ai/api/v1/public/projects/xwtgp8ven3/badge.svg)](https://msrit.ask.thili.ai/b/xwtgp8ven3)
+
+# Recipe Step Autocompleter
 
 This CLI tool assists home cooks by providing intelligent autocompletion for recipe instructions. It leverages next-word prediction and text generation capabilities to suggest logical continuations, ensuring no crucial steps are missed during cooking.
 
